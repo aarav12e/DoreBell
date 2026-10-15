@@ -23,6 +23,7 @@ function normalize(v) {
     person: val.person === true,
     bell: {
       ring: val.bell?.ring === true,
+      cause: typeof val.bell?.cause === "string" ? val.bell.cause : "bell",
       ts: typeof val.bell?.ts === "number" ? val.bell.ts : 0,
     },
   };

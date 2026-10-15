@@ -1,9 +1,12 @@
 import React, { useEffect, useState } from "react";
 import { BellIllustration } from "./BellIllustration";
+import { DoorIllustration } from "./DoorIllustration";
+import { RadarIllustration } from "./RadarIllustration";
 
 export function AlertOverlay({
   active,
   timestamp,
+  cause = "bell",
   mode = "ambient",
   onDismiss,
   vibrateEnabled = true,
@@ -48,6 +51,24 @@ export function AlertOverlay({
     ? new Date(timestamp).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" })
     : "Just now";
 
+  // Dynamic content based on which of the 3 sensors triggered
+  let alertTitle = "Doorbell Ringing!";
+  let alertDesc = "Touch doorbell pressed (Pin D5)";
+  let badgeLabel = "TOUCH SENSOR (D5)";
+  let visual = <BellIllustration ringing={true} size={110} />;
+
+  if (cause === "person") {
+    alertTitle = "Visitor Sensed at the Door!";
+    alertDesc = "Motion detected by the FC-51 IR sensor (Pin D6)";
+    badgeLabel = "IR SENSOR (D6)";
+    visual = <RadarIllustration detected={true} size={110} />;
+  } else if (cause === "door") {
+    alertTitle = "Door has been Opened!";
+    alertDesc = "Light detected entering threshold by LDR module (Pin A0)";
+    badgeLabel = "LDR LIGHT SENSOR (A0)";
+    visual = <DoorIllustration state="open" size={110} />;
+  }
+
   return (
     <div
       className={`alert-backdrop alert-mode-${mode}`}
@@ -66,16 +87,16 @@ export function AlertOverlay({
       <div className="alert-card">
         <div className="alert-badge">
           <span className="live-dot" />
-          VISUAL ALERT &middot; {elapsed > 0 ? `RINGING FOR ${elapsed}s` : "ACTIVE NOW"}
+          ALERT TRIGGERED &middot; {badgeLabel} &middot; {elapsed > 0 ? `${elapsed}s` : "NOW"}
         </div>
 
         <div className="alert-hero-visual">
-          <BellIllustration ringing={true} size={110} />
+          {visual}
         </div>
 
-        <h1 className="alert-title">Someone is at the Door!</h1>
+        <h1 className="alert-title">{alertTitle}</h1>
         <p className="alert-description">
-          The silent doorbell was pressed at <strong className="alert-time">{timeString}</strong>.
+          {alertDesc} at <strong className="alert-time">{timeString}</strong>.
         </p>
 
         {/* Signals fired */}

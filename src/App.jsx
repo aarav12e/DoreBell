@@ -142,6 +142,7 @@ export default function App() {
       <AlertOverlay
         active={effectiveAlertActive}
         timestamp={alertActive ? door.bell.ts : Date.now()}
+        cause={door.bell.cause || "bell"}
         mode="ambient"
         onDismiss={handleDismissAll}
         vibrateEnabled={settings.vibrate}
