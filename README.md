@@ -1,43 +1,50 @@
-# Silent Doorbell — Frontend
+# Silent Doorbell — ESP8266 + React
 
-React (Vite) dashboard for "The Doorbell Nobody Can Hear". It listens live to a Firebase
-Realtime Database written by the ESP8266 and shows a full-screen visual alert when the bell
-is pressed.
+A silent, accessible visual doorbell system for deaf and quiet living.
 
-## Run locally
+The ESP8266 writes sensor data to Firebase Realtime Database over Wi-Fi, and this React frontend displays real-time visual alerts and telemetry on your laptop or mobile phone.
+
+---
+
+## Hardware Pinout (ESP8266)
+
+The firmware code is saved in [`esp8266/esp8266.ino`](./esp8266/esp8266.ino):
+
+| Component | ESP8266 Pin | Firebase Path | Behavior |
+|-----------|-------------|---------------|----------|
+| **Touch Doorbell** | `D5` (Input) | `/door/bell` | Writes `{"ring": true, "ts": <timestamp>}` on touch |
+| **Servo Flag** | `D4` (Output) | — | Swings to 90° when bell is pressed |
+| **LED Indicator** | `D7` (Output) | — | Lights up when bell is pressed |
+| **Buzzer** | `D1` (Output) | — | Audio indicator |
+| **LDR Light Sensor** | `A0` (Analog) | `/door/state` | Writes `"open"` (light) or `"closed"` (dark) |
+| **FC-51 IR Sensor** | `D6` (Input) | `/door/person` | Writes `true` (visitor present) or `false` |
+
+---
+
+## How It Works
+
+1. When a visitor touches the **Touch Sensor (D5)**:
+   - The ESP8266 triggers the servo flag, lights the LED, and writes `/door/bell` with `ring: true`.
+   - The web app displays a **full-screen accessible visual alert**, vibrates the mobile phone, and plays an optional chime.
+   - Clicking **"Dismiss Alert"** on the website writes `/door/bell/ring = false`.
+2. When the door opens:
+   - Light hits the **LDR (A0)**, and the website shows the door swinging open in real time.
+3. When someone approaches:
+   - The **FC-51 IR sensor (D6)** detects obstacle proximity, showing visitor presence on the website.
+
+---
+
+## Frontend Setup
 
 ```bash
 npm install
 npm run dev
 ```
 
-With no `.env`, the app runs in **demo mode**: use the on-page buttons to simulate the hardware.
+Set your Firebase database URL in `.env`:
 
-## Connect your database
+```env
+VITE_FIREBASE_DB_URL=https://YOUR-PROJECT-default-rtdb.firebaseio.com
+```
 
-1. Firebase console → create project → Realtime Database → start in test mode.
-2. Copy `.env.example` to `.env` and set `VITE_FIREBASE_DB_URL`.
-3. Restart `npm run dev`.
-
-Data shape the ESP8266 must write:
-
-| Path           | Value                                  |
-|----------------|----------------------------------------|
-| `/door/bell`   | `{ "ring": true, "ts": <timestamp ms> }` |
-| `/door/state`  | `"open"` or `"closed"`                 |
-| `/door/person` | `true` or `false`                      |
-
-The website's Dismiss button sets `/door/bell/ring` to `false`.
-
-## Deploy on Vercel
-
-1. Push this folder to GitHub.
-2. Vercel → New Project → import the repo (Vite is auto-detected).
-3. Add environment variable `VITE_FIREBASE_DB_URL`, then deploy.
-
-The ESP8266 and the website do not need to be on the same Wi-Fi.
-
-## Note on database rules
-
-Test mode lets anyone with the URL read and write. Before a real deployment, restrict the
-rules (for example, require auth or limit writes to `/door`).
+The frontend runs with a clean **White Theme**, responsive for both mobile phones and laptop screens!

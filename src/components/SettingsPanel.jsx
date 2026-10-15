@@ -222,7 +222,31 @@ export function SettingsPanel({
 
         {/* Accessibility & Visual Comfort */}
         <div className="setting-group">
-          <label className="setting-group-label">Accessibility &amp; Contrast</label>
+          <label className="setting-group-label">Appearance &amp; Accessibility</label>
+
+          <div className="toggle-row">
+            <div className="toggle-text">
+              <span className="toggle-label">Color Theme</span>
+              <span className="toggle-desc">Switch between crisp White Theme and Dark Mode</span>
+            </div>
+            <div className="toggle-controls">
+              <button
+                type="button"
+                className={`chip ${(!settings.theme || settings.theme === "light") ? "active" : ""}`}
+                onClick={() => update("theme", "light")}
+              >
+                ☀️ White Theme
+              </button>
+              <button
+                type="button"
+                className={`chip ${settings.theme === "dark" ? "active" : ""}`}
+                onClick={() => update("theme", "dark")}
+              >
+                🌙 Dark Mode
+              </button>
+            </div>
+          </div>
+
           <div className="toggle-row">
             <div className="toggle-text">
               <span className="toggle-label">High Contrast Mode</span>

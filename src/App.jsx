@@ -4,29 +4,25 @@ import { BellIllustration } from "./components/BellIllustration";
 import { DoorIllustration } from "./components/DoorIllustration";
 import { RadarIllustration } from "./components/RadarIllustration";
 import { AlertOverlay } from "./components/AlertOverlay";
-import { ActivityLog } from "./components/ActivityLog";
-import { SettingsPanel } from "./components/SettingsPanel";
-import { SimulationBar } from "./components/SimulationBar";
 import { playChime } from "./sound";
 
-const SETTINGS_KEY = "silent-doorbell-settings-v2";
+const SETTINGS_KEY = "silent-doorbell-settings-v3";
 
 const DEFAULT_SETTINGS = {
+  theme: "light",
   vibrate: true,
-  vibratePattern: "standard",
   sound: false,
   soundPreset: "ding-dong",
   volume: 0.6,
   notify: false,
-  alertMode: "ambient", // 'ambient' | 'strobe' | 'banner' | 'spotlight'
-  highContrast: false,
-  reducedMotion: false,
 };
 
 function loadSettings() {
   try {
     const saved = localStorage.getItem(SETTINGS_KEY);
-    return saved ? { ...DEFAULT_SETTINGS, ...JSON.parse(saved) } : DEFAULT_SETTINGS;
+    return saved
+      ? { ...DEFAULT_SETTINGS, ...JSON.parse(saved), theme: JSON.parse(saved).theme || "light" }
+      : DEFAULT_SETTINGS;
   } catch {
     return DEFAULT_SETTINGS;
   }
@@ -44,87 +40,55 @@ function timeAgo(ts, now) {
   return new Date(ts).toLocaleDateString();
 }
 
-function formatDuration(seconds) {
-  const m = Math.floor(seconds / 60);
-  const s = seconds % 60;
-  return `${m.toString().padStart(2, "0")}:${s.toString().padStart(2, "0")}`;
+function clock(ts) {
+  return new Date(ts).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" });
 }
 
 export default function App() {
   const [settings, setSettings] = useState(loadSettings);
   const [now, setNow] = useState(Date.now());
   const [testAlertActive, setTestAlertActive] = useState(false);
-  const [showSimBar, setShowSimBar] = useState(true);
 
   const settingsRef = useRef(settings);
   settingsRef.current = settings;
 
-  // Handle incoming events (sound, vibration, notifications)
+  // Handle hardware incoming events
   const handleEvent = useCallback((evt) => {
     const s = settingsRef.current;
     if (evt.type === "bell") {
-      // Haptics
+      // Haptic vibration on mobile
       if (s.vibrate && navigator.vibrate) {
-        if (s.vibratePattern === "short") {
-          navigator.vibrate([200]);
-        } else if (s.vibratePattern === "sos") {
-          navigator.vibrate([150, 100, 150, 100, 150, 200, 400, 150, 400]);
-        } else {
-          navigator.vibrate([400, 150, 400, 150, 400]);
-        }
+        navigator.vibrate([400, 150, 400, 150, 400]);
       }
-      // Audio
+      // Soft sound chime if enabled
       if (s.sound) {
         playChime(s.soundPreset, s.volume);
       }
-    }
-
-    // Push notification
-    if (s.notify && "Notification" in window && Notification.permission === "granted") {
-      if (evt.type === "bell") {
+      // Browser notification
+      if (s.notify && "Notification" in window && Notification.permission === "granted") {
         try {
           new Notification("🔔 Doorbell Ringing!", {
-            body: "Someone is at the door right now.",
+            body: "Someone pressed the doorbell.",
             tag: "silent-doorbell-ring",
             requireInteraction: true,
           });
         } catch {
           /* ignore */
         }
-      } else if (evt.type === "person_arrived") {
-        try {
-          new Notification("🧍 Visitor Detected", {
-            body: "Motion sensed at the door.",
-            tag: "silent-doorbell-motion",
-          });
-        } catch {
-          /* ignore */
-        }
       }
     }
   }, []);
 
-  const {
-    door,
-    connected,
-    lastSeen,
-    history,
-    alertActive,
-    dismiss,
-    clearHistory,
-    simulate,
-    demo,
-    doorOpenSince,
-    stats,
-  } = useDoor(handleEvent);
+  const { door, connected, lastSeen, history, alertActive, dismiss, clearHistory } =
+    useDoor(handleEvent);
 
-  // Auto-updating clock ticker
+  // Time ticker
   useEffect(() => {
     const t = setInterval(() => setNow(Date.now()), 1000);
     return () => clearInterval(t);
   }, []);
 
-  // Persist settings
+  // Save settings
   useEffect(() => {
     try {
       localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings));
@@ -133,13 +97,17 @@ export default function App() {
     }
   }, [settings]);
 
-  // Tab Title & Favicon alert
-  const effectiveAlertActive = alertActive || testAlertActive;
+  // Sync theme
+  useEffect(() => {
+    document.documentElement.setAttribute("data-theme", settings.theme || "light");
+  }, [settings.theme]);
 
+  // Tab Title
+  const effectiveAlertActive = alertActive || testAlertActive;
   useEffect(() => {
     document.title = effectiveAlertActive
-      ? "🔔 [VISITOR AT THE DOOR] — Silent Doorbell"
-      : "Silent Doorbell · Accessible Alert System";
+      ? "🔔 [VISITOR AT DOOR] — Silent Doorbell"
+      : "Silent Doorbell · ESP8266 Live Monitor";
   }, [effectiveAlertActive]);
 
   const handleDismissAll = () => {
@@ -147,27 +115,40 @@ export default function App() {
     setTestAlertActive(false);
   };
 
-  const doorOpenSeconds = door.state === "open" && doorOpenSince
-    ? Math.max(0, Math.floor((now - doorOpenSince) / 1000))
-    : 0;
+  const toggleSetting = (key) => {
+    setSettings((s) => ({ ...s, [key]: !s[key] }));
+  };
+
+  const handleToggleNotify = async () => {
+    if (settings.notify) {
+      toggleSetting("notify");
+      return;
+    }
+    if (!("Notification" in window)) {
+      alert("This browser does not support notifications.");
+      return;
+    }
+    const perm = Notification.permission === "granted" ? "granted" : await Notification.requestPermission();
+    if (perm === "granted") {
+      setSettings((s) => ({ ...s, notify: true }));
+    }
+  };
+
+  const currentTheme = settings.theme || "light";
 
   return (
-    <div
-      className={`app-container ${settings.highContrast ? "high-contrast" : ""} ${
-        settings.reducedMotion ? "reduced-motion" : ""
-      }`}
-    >
-      {/* Visual Alert Overlay (Fullscreen / Strobe / Ambient / HUD) */}
+    <div className={`app-container theme-${currentTheme}`} data-theme={currentTheme}>
+      {/* Full-Screen Accessible Visual Alert Overlay */}
       <AlertOverlay
         active={effectiveAlertActive}
         timestamp={alertActive ? door.bell.ts : Date.now()}
-        mode={settings.alertMode}
+        mode="ambient"
         onDismiss={handleDismissAll}
         vibrateEnabled={settings.vibrate}
         soundEnabled={settings.sound}
       />
 
-      {/* Main App Header */}
+      {/* Header */}
       <header className="app-header">
         <div className="header-brand">
           <div className="brand-logo-wrap">
@@ -175,130 +156,71 @@ export default function App() {
             <span className="brand-icon">🔔</span>
           </div>
           <div>
-            <div className="eyebrow-tag">Accessibility &amp; Inclusion &middot; PS4</div>
-            <h1 className="brand-title">The Doorbell Nobody Can Hear</h1>
+            <div className="eyebrow-tag">ESP8266 IoT Hardware &middot; Live Monitor</div>
+            <h1 className="brand-title">The Silent Doorbell</h1>
             <p className="brand-desc">
-              Visual, vibrating &amp; on-screen alerts designed for deaf &amp; quiet living
+              Visual &amp; vibrating alerts for deaf and quiet living — connected directly to your ESP8266
             </p>
           </div>
         </div>
 
         <div className="header-meta">
-          {/* Connection status badge */}
           <div className={`status-pill ${connected ? "status-connected" : "status-disconnected"}`}>
             <span className="status-dot" />
             <div className="status-pill-info">
-              <span className="status-text">{demo ? "Demo Simulator" : connected ? "Firebase Live" : "Offline"}</span>
-              <span className="status-sub">{demo ? "Hardware Emulated" : "RTDB Synced"}</span>
+              <span className="status-text">{connected ? "Firebase Live" : "Connecting..."}</span>
+              <span className="status-sub">ESP8266 Synced</span>
             </div>
           </div>
 
-          {/* Quick Header Controls */}
           <div className="header-controls">
             <button
-              className={`header-btn ${settings.sound ? "btn-active" : ""}`}
-              onClick={() => setSettings((s) => ({ ...s, sound: !s.sound }))}
-              title={settings.sound ? "Sound is active (Click to mute)" : "Sound is muted (Click to enable)"}
+              className="header-btn btn-theme"
+              onClick={() =>
+                setSettings((s) => ({
+                  ...s,
+                  theme: s.theme === "dark" ? "light" : "dark",
+                }))
+              }
+              title="Toggle Light / Dark mode"
             >
-              {settings.sound ? "🔊 Audio On" : "🔇 Silent"}
+              {currentTheme === "dark" ? "🌙 Dark" : "☀️ Light"}
             </button>
 
             <button
               className="header-btn btn-highlight"
               onClick={() => setTestAlertActive(true)}
-              title="Preview the visual alert screen right now"
+              title="Test the visual alert screen"
             >
               ⚡ Test Alert
-            </button>
-
-            <button
-              className={`header-btn ${settings.highContrast ? "btn-active" : ""}`}
-              onClick={() => setSettings((s) => ({ ...s, highContrast: !s.highContrast }))}
-              title="Toggle high-contrast accessible mode"
-            >
-              ♿ Contrast
             </button>
           </div>
         </div>
       </header>
 
-      {/* Quick Telemetry Summary Bar */}
-      <section className="stats-strip" aria-label="Quick metrics">
-        <div className="stat-card">
-          <div className="stat-icon-wrap icon-bell">
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-              <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9" />
-              <path d="M13.73 21a2 2 0 0 1-3.46 0" />
-            </svg>
-          </div>
-          <div>
-            <div className="stat-value">{stats.rings}</div>
-            <div className="stat-label">Doorbell Rings</div>
-          </div>
-        </div>
-
-        <div className="stat-card">
-          <div className="stat-icon-wrap icon-person">
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-              <circle cx="12" cy="7" r="4" />
-              <path d="M5.5 21a8.5 8.5 0 0 1 13 0" />
-            </svg>
-          </div>
-          <div>
-            <div className="stat-value">{stats.visitors}</div>
-            <div className="stat-label">Visitors Sensed</div>
-          </div>
-        </div>
-
-        <div className="stat-card">
-          <div className="stat-icon-wrap icon-door">
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-              <path d="M3 21h18M6 21V3h12v18M10 12h2" />
-            </svg>
-          </div>
-          <div>
-            <div className="stat-value">{stats.doors}</div>
-            <div className="stat-label">Door Openings</div>
-          </div>
-        </div>
-
-        <div className="stat-card">
-          <div className="stat-icon-wrap icon-sync">
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-              <circle cx="12" cy="12" r="10" />
-              <polyline points="12 6 12 12 16 14" />
-            </svg>
-          </div>
-          <div>
-            <div className="stat-value">{new Date(now).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" })}</div>
-            <div className="stat-label">{lastSeen ? `Updated ${timeAgo(lastSeen, now)}` : "Live clock"}</div>
-          </div>
-        </div>
-      </section>
-
-      {/* Main Three Visual Telemetry Cards */}
-      <main className="telemetry-grid" aria-label="Live Sensor Telemetry">
-        {/* Card 1: Doorbell Status */}
+      {/* The 3 Core Hardware Sensor Cards */}
+      <main className="telemetry-grid" aria-label="ESP8266 Sensors">
+        {/* Sensor 1: Touch Doorbell (Pin D5) */}
         <article className={`telemetry-card card-bell ${alertActive ? "state-ringing" : ""}`}>
           <div className="telemetry-top">
             <span className="telemetry-badge">
               <span className={`badge-indicator ${alertActive ? "ringing" : "idle"}`} />
-              DOORBELL BUTTON
+              DOORBELL (TOUCH D5)
             </span>
-            {alertActive && <span className="urgent-tag">RINGING NOW</span>}
+            {alertActive && <span className="urgent-tag">RINGING</span>}
           </div>
 
           <div className="telemetry-visual-row">
             <BellIllustration ringing={alertActive} size={82} />
             <div className="telemetry-readout">
               <div className="readout-title">
-                {alertActive ? "Someone is Ringing" : "Doorbell Idle"}
+                {alertActive ? "Doorbell Pressed!" : "Doorbell Idle"}
               </div>
               <div className="readout-status">
-                {alertActive ? "ALERT ACTIVE" : "Quiet & Waiting"}
+                {alertActive ? "VISITOR RINGING" : "Quiet"}
               </div>
               <div className="readout-meta">
-                {door.bell.ts ? `Last rang ${timeAgo(door.bell.ts, now)}` : "No rings recorded"}
+                {door.bell.ts ? `Last ring ${timeAgo(door.bell.ts, now)}` : "No rings yet"}
               </div>
             </div>
           </div>
@@ -306,116 +228,234 @@ export default function App() {
           <div className="telemetry-footer-action">
             {alertActive ? (
               <button className="btn-dismiss-card" onClick={dismiss}>
-                ✓ Got it — Dismiss
+                ✓ Dismiss Alert
               </button>
             ) : (
-              <button className="btn-card-action" onClick={() => simulate("bell")}>
-                Simulate Press
-              </button>
+              <div className="sensor-pin-pill">Hardware: Touch Sensor on Pin D5</div>
             )}
           </div>
         </article>
 
-        {/* Card 2: Door Threshold Sensor */}
+        {/* Sensor 2: Door Sensor (LDR Pin A0) */}
         <article className={`telemetry-card card-door ${door.state === "open" ? "state-open" : "state-closed"}`}>
           <div className="telemetry-top">
             <span className="telemetry-badge">
               <span className={`badge-indicator ${door.state === "open" ? "open" : "closed"}`} />
-              THRESHOLD SENSOR
+              DOOR (LDR A0)
             </span>
-            <span className="sensor-tag">Light / Reed Switch</span>
+            <span className="sensor-tag">Light Sensor</span>
           </div>
 
           <div className="telemetry-visual-row">
             <DoorIllustration state={door.state} size={82} />
             <div className="telemetry-readout">
               <div className="readout-title">
-                {door.state === "open" ? "Door is Ajar / Open" : "Door is Shut"}
+                {door.state === "open" ? "Door Opened" : "Door Closed"}
               </div>
               <div className={`readout-status ${door.state === "open" ? "warn" : "ok"}`}>
-                {door.state === "open" ? "UNSECURED (OPEN)" : "SECURELY CLOSED"}
+                {door.state === "open" ? "OPEN" : "CLOSED"}
               </div>
               <div className="readout-meta">
-                {door.state === "open"
-                  ? `Open for ${formatDuration(doorOpenSeconds)}`
-                  : "Sensor: Light blocked"}
+                {door.state === "open" ? "Light entering threshold" : "Threshold dark / locked"}
               </div>
             </div>
           </div>
 
           <div className="telemetry-footer-action">
-            <button className="btn-card-action" onClick={() => simulate("toggleDoor")}>
-              {door.state === "open" ? "Close Door" : "Open Door"}
-            </button>
+            <div className="sensor-pin-pill">Hardware: LDR on Analog A0</div>
           </div>
         </article>
 
-        {/* Card 3: Visitor IR Radar */}
+        {/* Sensor 3: Visitor Detection (FC-51 IR Pin D6) */}
         <article className={`telemetry-card card-visitor ${door.person ? "state-detected" : "state-clear"}`}>
           <div className="telemetry-top">
             <span className="telemetry-badge">
               <span className={`badge-indicator ${door.person ? "detected" : "clear"}`} />
-              PROXIMITY RADAR
+              VISITOR (IR D6)
             </span>
-            <span className="sensor-tag">ESP8266 IR Sensor</span>
+            <span className="sensor-tag">FC-51 IR</span>
           </div>
 
           <div className="telemetry-visual-row">
             <RadarIllustration detected={door.person} size={82} />
             <div className="telemetry-readout">
               <div className="readout-title">
-                {door.person ? "Visitor Detected" : "Perimeter Clear"}
+                {door.person ? "Person at Door" : "Perimeter Clear"}
               </div>
               <div className={`readout-status ${door.person ? "warn" : "ok"}`}>
-                {door.person ? "MOTION SENSE ACTIVE" : "NO PRESENCE"}
+                {door.person ? "DETECTED" : "CLEAR"}
               </div>
               <div className="readout-meta">
-                {door.person ? "Subject within threshold range" : "IR beam unbroken"}
+                {door.person ? "Obstacle detected by IR sensor" : "No motion in front of door"}
               </div>
             </div>
           </div>
 
           <div className="telemetry-footer-action">
-            <button className="btn-card-action" onClick={() => simulate("togglePerson")}>
-              {door.person ? "Clear Visitor" : "Visitor Arrives"}
-            </button>
+            <div className="sensor-pin-pill">Hardware: FC-51 on Pin D6</div>
           </div>
         </article>
       </main>
 
-      {/* Hardware Simulation Deck */}
-      {showSimBar && (
-        <SimulationBar
-          onSimulate={simulate}
-          doorState={door.state}
-          personDetected={door.person}
-          alertActive={alertActive}
-          demoMode={demo}
-          connected={connected}
-        />
-      )}
-
-      {/* Split Section: Activity Timeline & Settings Suite */}
+      {/* Split Section: Activity Log & Device Settings */}
       <section className="app-split-layout">
-        <ActivityLog history={history} onClear={clearHistory} now={now} />
-        <SettingsPanel
-          settings={settings}
-          onUpdateSettings={setSettings}
-          onTriggerTestAlert={() => setTestAlertActive(true)}
-          lastSeen={lastSeen}
-          now={now}
-          demoMode={demo}
-        />
+        {/* Simple Activity Log */}
+        <div className="panel activity-simple-panel">
+          <div className="panel-header">
+            <div className="activity-title-group">
+              <div className="panel-icon-wrap">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                  <polyline points="22 12 18 12 15 21 9 3 6 12 2 12" />
+                </svg>
+              </div>
+              <div>
+                <h2 className="panel-title">Activity Log</h2>
+                <p className="panel-subtitle">Events sent from your ESP8266</p>
+              </div>
+            </div>
+
+            {history.length > 0 && (
+              <button className="btn-ghost-sm" onClick={clearHistory}>
+                Clear
+              </button>
+            )}
+          </div>
+
+          <div className="activity-scroll">
+            {history.length === 0 ? (
+              <div className="activity-empty">
+                <p className="empty-title">Waiting for ESP8266 events...</p>
+                <p className="empty-desc">
+                  When someone touches the bell or passes the sensors, events appear here instantly.
+                </p>
+              </div>
+            ) : (
+              <ul className="activity-list">
+                {history.map((e) => {
+                  let icon = "🔔";
+                  let title = "Doorbell pressed";
+                  let badge = "badge-bell";
+
+                  if (e.type === "door_open") {
+                    icon = "🚪";
+                    title = "Door opened (LDR)";
+                    badge = "badge-door-open";
+                  } else if (e.type === "door_closed") {
+                    icon = "🔒";
+                    title = "Door closed";
+                    badge = "badge-door-closed";
+                  } else if (e.type === "person_arrived") {
+                    icon = "🧍";
+                    title = "Person detected (IR)";
+                    badge = "badge-person";
+                  } else if (e.type === "person_left") {
+                    icon = "👋";
+                    title = "Visitor stepped away";
+                    badge = "badge-person-left";
+                  }
+
+                  return (
+                    <li key={e.id} className={`activity-row ${badge}`}>
+                      <span className="simple-event-icon">{icon}</span>
+                      <div className="activity-body">
+                        <div className="activity-main-line">
+                          <span className="activity-label">{title}</span>
+                          <time className="activity-time-rel">{timeAgo(e.at, now)}</time>
+                        </div>
+                        <span className="activity-clock">{clock(e.at)}</span>
+                      </div>
+                    </li>
+                  );
+                })}
+              </ul>
+            )}
+          </div>
+        </div>
+
+        {/* Simple Device Settings */}
+        <div className="panel settings-simple-panel">
+          <div className="panel-header">
+            <div className="activity-title-group">
+              <div className="panel-icon-wrap">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                  <circle cx="12" cy="12" r="3" />
+                  <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z" />
+                </svg>
+              </div>
+              <div>
+                <h2 className="panel-title">Device Alerts</h2>
+                <p className="panel-subtitle">How this device notifies you</p>
+              </div>
+            </div>
+          </div>
+
+          <div className="settings-simple-list">
+            {/* Vibrate switch */}
+            <div className="toggle-row">
+              <div className="toggle-text">
+                <span className="toggle-label">Vibrate on Bell Ring</span>
+                <span className="toggle-desc">Vibrates mobile phone when touch sensor is pressed</span>
+              </div>
+              <label className="custom-switch">
+                <input
+                  type="checkbox"
+                  checked={settings.vibrate}
+                  onChange={() => toggleSetting("vibrate")}
+                />
+                <span className="switch-slider" />
+              </label>
+            </div>
+
+            {/* Push notification switch */}
+            <div className="toggle-row">
+              <div className="toggle-text">
+                <span className="toggle-label">Browser Notifications</span>
+                <span className="toggle-desc">Show notification popup on this device</span>
+              </div>
+              <label className="custom-switch">
+                <input
+                  type="checkbox"
+                  checked={settings.notify}
+                  onChange={handleToggleNotify}
+                />
+                <span className="switch-slider" />
+              </label>
+            </div>
+
+            {/* Soft chime switch */}
+            <div className="toggle-row">
+              <div className="toggle-text">
+                <span className="toggle-label">Soft Audio Chime</span>
+                <span className="toggle-desc">Optional sound (keep off for 100% silent)</span>
+              </div>
+              <label className="custom-switch">
+                <input
+                  type="checkbox"
+                  checked={settings.sound}
+                  onChange={() => toggleSetting("sound")}
+                />
+                <span className="switch-slider" />
+              </label>
+            </div>
+
+            {/* Last update note */}
+            {lastSeen && (
+              <p className="muted small">
+                Last database ping: {timeAgo(lastSeen, now)}
+              </p>
+            )}
+          </div>
+        </div>
       </section>
 
       {/* Footer */}
       <footer className="app-footer">
         <div className="footer-content">
           <div className="footer-left">
-            <strong>The Silent Doorbell Project</strong> &middot; An accessible IoT visual notification system
+            <strong>The Silent Doorbell</strong> &middot; NodeMCU ESP8266 + Firebase Realtime Database
           </div>
           <div className="footer-right">
-            ESP8266 Microcontroller &middot; Firebase Realtime Database &middot; Web Audio API
+            Touch Sensor (D5) &middot; LDR Light (A0) &middot; FC-51 IR (D6) &middot; Servo Flag (D4)
           </div>
         </div>
       </footer>
